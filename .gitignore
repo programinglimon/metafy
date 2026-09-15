@@ -1,0 +1,13 @@
+# dependencies and build output
+node_modules/
+client/dist/
+
+# local secrets — never commit these (MONGODB_URI, JWT_SECRET, ENCRYPTION_KEY)
+.env
+.env.local
+client/.env
+client/.env.local
+
+# logs / editor noise
+npm-debug.log*
+.DS_Store

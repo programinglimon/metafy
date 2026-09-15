@@ -1,0 +1,28 @@
+{
+  "name": "adobe-stock-metadata-mern",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MERN app: Express server (/server) + React client (/client), deployable to Vercel as-is.",
+  "scripts": {
+    "server": "nodemon server/server.js",
+    "client": "npm run dev --prefix client",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "build": "npm install --prefix client && npm run build --prefix client",
+    "start": "node server/server.js",
+    "test": "node server/tests/rotation.test.mjs && node server/tests/userKeys.test.mjs",
+    "test:rotation": "node server/tests/rotation.test.mjs"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "mongoose": "^8.6.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4",
+    "concurrently": "^8.2.2"
+  }
+}
