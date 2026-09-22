@@ -230,6 +230,29 @@ function check(name, fn) {
   });
 }
 
+// ---- 5. sequential fallback down three keys: 1 fails → 2 fails → 3 works ----
+{
+  seen.length = 0;
+  updates.length = 0;
+  fakeUser = makeUser([poolKey('A-KEY-1'), poolKey('B-KEY-2'), poolKey('C-KEY-3')]);
+  responder = (n) => (n <= 2 ? { status: 429, body: dailyQuotaBody } : { status: 200, body: okBody() });
+
+  const out = await callGenerate();
+  check('key 1 fails -> key 2 fails -> key 3 serves (in saved order)', () => {
+    assert.deepEqual(seen.map((s) => s.key), ['A-KEY-1', 'B-KEY-2', 'C-KEY-3']);
+    assert.equal(out.body.usedKey.position, 3);
+    assert.equal(out.body.usedKey.of, 3);
+    assert.equal(out.body.results[0].ok, true);
+  });
+  check('both failed keys are marked spent, only keys 1 and 2 learn limits', () => {
+    const e0 = updates.find((x) => 'encryptedApiKeys.0.exhaustedDayKey' in x.update.$set);
+    const e1 = updates.find((x) => 'encryptedApiKeys.1.exhaustedDayKey' in x.update.$set);
+    assert.ok(e0, 'key 1 not marked spent');
+    assert.ok(e1, 'key 2 not marked spent');
+    assert.equal(e0.update.$set['encryptedApiKeys.0.limit'], 250);
+    assert.equal(e1.update.$set['encryptedApiKeys.1.limit'], 250);
+  });
+}
 server.close();
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

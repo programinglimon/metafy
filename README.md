@@ -171,3 +171,16 @@ npm run client   # just Vite, on :5173
   (issued at signup/login) via `server/middleware/auth.js`.
 - This project ships with no admin panel or password-reset flow — add one if
   you plan to give accounts to other people.
+
+## Google Sign-In
+
+- "Continue with Google" is optional. Set `GOOGLE_CLIENT_ID` on the server (`.env`)
+  and `VITE_GOOGLE_CLIENT_ID` on the client (`client/.env`, baked into the build).
+  Without them only email + password sign-up is shown.
+- Google accounts have no password; password sign-in on a Google-only account
+  returns a hint to use Google instead. A Google sign-in whose email already has a
+  password account links to that account (same email).
+- The server verifies the Google id_token (RS256) against Google published keys
+  in `server/utils/googleAuth.js` using Node built-ins - no extra dependency.
+- Tested by `npm run test:auth`.
+

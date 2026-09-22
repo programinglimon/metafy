@@ -4,7 +4,7 @@ import { api, getToken, setToken } from '../api.js';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null); // { email, hasApiKey }
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -40,13 +40,19 @@ export function AuthProvider({ children }) {
     setUser({ email: res.email, apiKeys: res.apiKeys });
   }
 
+  async function googleSignIn(idToken) {
+    const res = await api.googleAuth(idToken);
+    setToken(res.token);
+    setUser({ email: res.email, apiKeys: res.apiKeys });
+  }
+
   function logout() {
     setToken(null);
     setUser(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, setUser, loading, login, signup, logout, refresh }}>
+    <AuthContext.Provider value={{ user, setUser, loading, login, signup, googleSignIn, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

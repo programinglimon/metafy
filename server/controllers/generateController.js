@@ -120,17 +120,39 @@ export async function describeAiError(providerLabel, res, rawBody = null) {
 }
 
 function cleanResult(raw, assetType = 'photo') {
-  // Icon mode: title capped at 200 chars (aim for ~70 via the prompt),
-  // keywords capped at the research-proven 35 sweet spot for icon ranking.
-  const titleMax = 200;
+  // Icon mode: title capped at 80 chars (prompt targets 70-80), keywords capped
+  // at the research-proven 35 sweet spot for icon ranking, and every keyword kept
+  // to a single word (once each). For photos, keywords may be phrases.
+  const titleMax = assetType === 'icon' ? 80 : 200;
   const kwMax = assetType === 'icon' ? ICON_OPTIMAL_KW_COUNT : 60;
-  const title = String(raw?.title ?? '').trim().slice(0, titleMax);
-  const keywords = Array.isArray(raw?.keywords)
-    ? raw.keywords.map((k) => String(k).toLowerCase().trim()).filter(Boolean).slice(0, kwMax)
+  const title = truncateTitle(raw?.title, titleMax);
+  const baseKeywords = Array.isArray(raw?.keywords)
+    ? raw.keywords.map((k) => String(k).toLowerCase().trim()).filter(Boolean)
     : [];
+  const keywords = (assetType === 'icon'
+    ? baseKeywords
+        .filter((k) => !/\s/.test(k)) // single words only — drop any multi-word/phrase keywords
+        .filter((k, i, arr) => arr.indexOf(k) === i) // each word once — no exact duplicates
+    : baseKeywords
+  ).slice(0, kwMax);
   if (!title || !keywords.length) return null;
   const category = CATEGORIES.some(([n]) => n === Number(raw.category)) ? Number(raw.category) : 13;
   return { title, keywords, category };
+}
+
+// Cut a title to `max` chars but NEVER in the middle of a word — always end on a
+// complete, meaningful word so "application" never becomes "applicati".
+function truncateTitle(rawTitle, max) {
+  const t = String(rawTitle ?? '').trim();
+  if (!t) return '';
+  if (t.length <= max) return t;
+  // Slice to the max length, then back off to the last complete word boundary.
+  let cut = t.slice(0, max).trimEnd();
+  const lastSpace = cut.lastIndexOf(' ');
+  if (lastSpace > 0) {
+    cut = cut.slice(0, lastSpace).trimEnd();
+  }
+  return cut;
 }
 
 // Tolerant JSON extraction: some providers wrap the JSON in ``` fences or add

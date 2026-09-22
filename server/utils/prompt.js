@@ -17,75 +17,46 @@ function rulesText({ kwCount = 45, titleMin = 10, titleMax = 16, assetType = 'ph
     // settings icon", "home button icon outline". Every slot below is mapped to
     // a specific ranking tier so the AI fills the highest-value positions first.
     //
-    // Title target: ~70 chars (200 allowed, but <70 chars = proven better rank).
+    // Title target: 70-80 chars (Adobe Stock sweet spot).
     // Keyword count: exactly ${kwCount} (Adobe Stock sweet spot — do NOT exceed).
     //
     // Format buyers actually type:
-    //   "[subject] icon"              → SLOT 1 (highest weight)
-    //   "[subject] icon [style]"      → SLOT 2
-    //   "[subject] [style] icon"      → SLOT 3
-    //   "[synonym] icon"              → SLOTS 4-6
-    //   "icon", "icons", "vector"...  → SLOTS 7-10 (still top-10 = high weight)
-    //   UI/UX use-case terms          → SLOTS 11-18
-    //   Style vocabulary              → SLOTS 19-25
-    //   Broader related concepts      → SLOTS 26-35
+    //   "[subject] [context] [style] icon" → icon is the LAST word (highest weight)
+    //   Note: title pattern = subject + optional ONE context word + style + "icon".
+    //     "icon", "icons", "vector"...  → top keywords order (subject first)
+    //     UI/UX, style, use-case terms  → belong in the KEYWORDS array, not the title
 
-    return `TITLE (target ~70 characters, maximum 200, sentence case — only first letter capitalised):
+    return `TITLE (70-80 CHARACTERS, sentence case — only first letter capitalised):
 RULES for the TITLE (follow every rule strictly):
-1. START with the exact noun buyers search: the thing the icon represents (e.g. "Calendar icon", "Shopping cart icon", "Settings gear icon").
-2. The word "icon" MUST appear in the title, ideally as the 2nd or 3rd word.
-3. After "[subject] icon" add 1-2 STYLE words buyers filter by: flat, line, outline, filled, bold, minimalist, rounded, thin line, solid, two tone, monochrome, simple, modern, gradient.
-4. KEEP IT SHORT — aim for ~70 characters total (e.g. "Calendar icon flat design minimalist" = 36 chars, excellent).
-5. DO NOT exceed 200 characters. DO NOT use ALL CAPS. DO NOT use "beautiful", "stunning", "amazing".
-6. NEVER use photo/camera language: no "photo", "image of", "bokeh", "depth of field", "shot", "photography", "lighting".
-7. NO keyword stuffing — write a natural phrase a human designer would type in the search box.
-8. Good examples: "Settings gear icon flat minimalist" | "Home button icon outline thin line" | "Shopping cart icon bold filled style" | "Calendar icon flat design vector".
+1. FIXED ORDER — build the title as [subject] + [one context/category word] + [style] + "icon" and end with "icon" (e.g. "Acorn nature outline icon", "Toaster kitchen appliance filled icon"). NEVER put "icon" in the middle; it is the LAST word.
+2. BANNED FILLER WORDS — never use these in the title: design, modern, minimalist, style, "for [X] applications", vector, illustration, isolated, symbol, white background, and "set" (unless the file genuinely contains multiple style variants).
+3. STYLE — use only real, visually accurate, searchable style terms: line, outline, filled, glyph, flat, duotone, gradient, solid, hand-drawn, 3D, isometric, minimal. Never use vague style adjectives like "modern" or "clean" (no search value). If the file has only ONE style, name just that one; combine two styles with "and" ONLY if both truly appear in the image.
+4. LENGTH — hard requirement: 70-80 characters total (roughly 9-10 words, aim to stay at or under 10 words; an 80-char title is naturally ~11 words). If too long, remove context/category words first and keep only subject + style + "icon".
+5. SEARCH-BAR TEST — before finalizing, check every word against: "Would a real Adobe Stock buyer type this exact word into the search bar?" If no, delete it no matter how descriptive or professional it sounds. Do NOT restate the subject using a different word right after it (e.g. "Toaster bread toaster icon" is banned). A context word is allowed ONLY if it adds NEW information (category or use-case), never just to re-describe the same subject.
+6. KEYWORDS, NOT THE TITLE — all synonyms, related concepts, and use-case terms belong in the KEYWORDS array (which allows up to ${kwCount} entries), never stuffed into the title.
+7. NEVER use photo/camera language (no "photo", "image of", "bokeh", "shot", "photography", "lighting"), no ALL CAPS, no "beautiful"/"stunning"/"amazing", no brand/trademarked terms, no keyword stuffing — write a natural phrase a human designer would type.
+8. Good examples (pattern only — extend each with accurate descriptors to reach the 70-80 char length): "Acorn nature outline icon" | "Toaster kitchen appliance filled icon" | "Calendar date flat icon".
 
-KEYWORDS (exactly ${kwCount} tags, all lowercase, no hashtags, no repeats, ORDERED from most-to-least relevant — ORDER IS CRITICAL for ranking):
-SLOT 1  → [primary subject] icon                     (e.g. "calendar icon") — HIGHEST WEIGHT
-SLOT 2  → [primary subject] icon [style]              (e.g. "calendar icon flat")
-SLOT 3  → [primary subject] [style] icon              (e.g. "calendar flat icon")
-SLOT 4  → [synonym/alt name] icon                     (e.g. "schedule icon", "date icon")
-SLOT 5  → [synonym] icon [style]                      (e.g. "planner icon flat")
-SLOT 6  → [synonym] [style] icon                      (e.g. "date flat icon")
-SLOT 7  → "icon"                                      (standalone — high-traffic root term)
-SLOT 8  → "vector icon"                               (format term buyers filter by)
-SLOT 9  → "symbol"                                    (buyers often search [subject] symbol)
-SLOT 10 → "pictogram"                                 (still top-10 = algorithm-boosted)
-— SLOTS 1-10 above are the MOST IMPORTANT. Title words MUST appear in slots 1-3. —
-SLOT 11 → "icons" (plural)
-SLOT 12 → "vector"
-SLOT 13 → "glyph"
-SLOT 14 → "ui icon"
-SLOT 15 → "app icon"
-SLOT 16 → "web icon"
-SLOT 17 → "interface icon"
-SLOT 18 → "mobile icon"
-SLOT 19 → [icon style full phrase] e.g. "flat design"
-SLOT 20 → [style variant] e.g. "line icon" or "outline icon" or "filled icon"
-SLOT 21 → "minimalist"
-SLOT 22 → "simple icon"
-SLOT 23 → "modern icon"
-SLOT 24 → "clean icon"
-SLOT 25 → another style variant (e.g. "solid icon", "bold icon", "rounded icon")
-SLOT 26 → "user interface"
-SLOT 27 → "ui design"
-SLOT 28 → "ux"
-SLOT 29 → "website icon"
-SLOT 30 → "dashboard"
-SLOT 31 → use-case context (e.g. "button icon", "navigation icon", "toolbar icon")
-SLOT 32 → broader concept related to subject (e.g. for calendar: "time management")
-SLOT 33 → second synonym/alt name (singular)
-SLOT 34 → second synonym/alt name (plural or compound)
-SLOT 35 → "icon set" or "set of icons" (many buyers search for sets)
+KEYWORDS (exactly ${kwCount} tags, all lowercase, no hashtags, no repeats, single words only, ORDERED from most-to-least relevant — ORDER IS CRITICAL for ranking):
+MOST IMPORTANT RULE — EVERY keyword MUST be EXACTLY ONE WORD: a single word with NO spaces, never combine words (NO "calendar icon", "flat design", "user interface", "icon set", "ui icon"). Use each concept's word only ONCE, pick just one form (never both "icon" and "icons"). One-word-only terms (e.g. "calendar", "schedule", "planner", "date", "icon", "vector", "flat", "minimalist", "ui", "interface", "navigation", "dashboard", "glyph", "symbol", "pictogram", "app").
+
+ORDER (Adobe Stock weights the FIRST keywords most heavily — put the icon-related main keywords FIRST, in this priority. Use ONLY ONE word per concept — never both singular and plural):
+- SLOTS 1-3  → the icon's PRIMARY subject (ONE form only — pick singular, e.g. "calendar"), then "icon" — HIGHEST WEIGHT
+- SLOTS 4-6  → "vector", then the subject's synonyms/alt names (e.g. "schedule", "planner", "date") — each only ONCE
+- SLOTS 7-10 → format/type words: "glyph", "symbol", "pictogram", "app" — still high weight
+- SLOTS 11-14 → strong brand-independent style words FIRST: "flat", "minimalist", "outline", "filled"
+- SLOTS 15-18 → use-case/UI words: "ui", "interface", "navigation", "dashboard"
+- SLOTS 19+   → remaining style words, broader related concepts, other synonyms
 
 STRICT KEYWORD RULES:
-- Follow the slot order above as closely as the icon's actual subject allows.
-- EVERY keyword must describe this specific icon — no irrelevant trending terms.
-- Include BOTH singular and plural forms of the subject name.
-- Include the EXACT words from the title in SLOTS 1-3.
+- Every keyword must be EXACTLY ONE single word — no spaces allowed in any keyword.
+- Use ONLY ONE word per concept, appearing EXACTLY once — NEVER both singular and plural of the same word (pick only one of "icon"/"icons", "calendar"/"calendars").
+- Every keyword must be a DISTINCT, non-repeating single word — no two keywords may be forms of the same word.
+- The icon-related MAIN keywords (subject + "icon"/"vector" + synonyms) MUST come first in order — never push them to the end.
+- Include the EXACT single words from the title in the first few positions where possible.
+- Every keyword must describe this specific icon — no irrelevant trending terms.
 - Do NOT include: brand names, trademarked terms, competitor names, photo terms.
-- Do NOT repeat a keyword even with slight variation (e.g. "flat icon" and "flat icons" count as repeats — pick one).
+- Do NOT repeat a keyword even with slight variation — every keyword must be a distinct single word.
 
 CATEGORY: one integer from this fixed Adobe Stock list, pick the single best match: ${catList}.`;
   }

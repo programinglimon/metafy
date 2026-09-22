@@ -501,3 +501,9 @@ header.top{
   .settings{max-width:none;}
   .dropzone{padding:38px 16px;}
 }
+.auth-google{margin:6px 0 2px;display:flex;justify-content:center;}
+.auth-google div{display:flex;justify-content:center;}
+.auth-google.is-disabled{opacity:.55;pointer-events:none;}
+.auth-divider{display:flex;align-items:center;gap:10px;margin:8px 0 4px;color:var(--muted-2);font-size:11px;font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.05em;}
+.auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:var(--line);}
+.google-hint{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted-2);text-align:center;margin:8px 0 0;}

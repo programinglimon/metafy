@@ -10,8 +10,9 @@
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "build": "npm install --prefix client && npm run build --prefix client",
     "start": "node server/server.js",
-    "test": "node server/tests/rotation.test.mjs && node server/tests/userKeys.test.mjs",
-    "test:rotation": "node server/tests/rotation.test.mjs"
+    "test": "node server/tests/rotation.test.mjs && node server/tests/userKeys.test.mjs && node server/tests/googleAuth.test.mjs",
+    "test:rotation": "node server/tests/rotation.test.mjs",
+    "test:auth": "node server/tests/googleAuth.test.mjs"
   },
   "dependencies": {
     "express": "^4.19.2",

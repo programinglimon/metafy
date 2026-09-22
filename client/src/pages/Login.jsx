@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import GoogleSignIn from '../components/GoogleSignIn.jsx';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, googleSignIn } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,12 +25,28 @@ export default function Login() {
     }
   }
 
+  async function onGoogle(credential) {
+    setError('');
+    setBusy(true);
+    try {
+      await googleSignIn(credential);
+      navigate('/');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="auth-screen">
       <form className="auth-card" onSubmit={onSubmit}>
         <div className="mark"><span className="dot" />SHEET / METADATA</div>
         <h1>Sign in</h1>
         <p className="sub">Access your metadata workspace.</p>
+
+        <GoogleSignIn onSuccess={onGoogle} disabled={busy} />
+        <div className="auth-divider">or</div>
 
         <label>Email</label>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
