@@ -11,6 +11,8 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' })); // room for resized base64 images
 
+// Simple root landing so the live API URL doesn't show a raw "Cannot GET /".
+app.get('/', (req, res) => res.json({ ok: true, name: 'Metafy Adobe Stock Metadata API' }));
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
