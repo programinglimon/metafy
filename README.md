@@ -118,15 +118,18 @@ npm run client   # just Vite, on :5173
 ## Notes and limits
 
 - Images are resized client-side to a max dimension of 1280px (JPEG, quality
-  0.85) before upload, both to keep Gemini calls fast/cheap and to stay under
-  Vercel's ~4.5MB request body limit for serverless functions.
-- **Generation is batched**: the client groups images into batches of 6
+  0.85) before upload, both to keep Gemini calls fast/cheap and to stay well
+  under the API's 16MB JSON body limit.
+- **Generation is batched**: the client groups images into batches of 10
   (`BATCH_SIZE` in `Dashboard.jsx`) and sends each batch as **one** API
   request (`/api/generate` accepts an `images: []` array, batched on every
   provider). Because providers limit and bill per request — not per image — a
-  free-tier key covers roughly 6x more images than images-per-request. To
-  change the batch size, set the server env var `GEMINI_BATCH_SIZE` (1–10) and
-  match the client constant.
+  free-tier key covers roughly 10x more images than images-per-request. Batches
+  are sent **strictly one at a time** (no parallel requests), so only a single
+  API key is ever on the wire — the pool is never spread across two keys at
+  once. The model's output budget scales with the batch (≈2k tokens per image),
+  so a 10-image request is not truncated. To change the batch size, set the
+  server env var `GEMINI_BATCH_SIZE` (1–10) and match the client constant.
 - **Multiple providers**: users can save API keys for Google Gemini, Mistral
   AI and OpenRouter independently (Settings → Provider). All three are called
   through their OpenAI-compatible Chat Completions endpoints, so one request
@@ -135,15 +138,30 @@ npm run client   # just Vite, on :5173
   the User model. Each user's keys are stored per-provider, AES-256-GCM
   encrypted, and decrypted only server-side at request time.
 - **Key rotation (auto-switch)**: saving several keys for one provider adds them
-  to a pool that generation walks in order. A key that is rate limited or out of
-  daily quota rotates to the next one automatically — the client only sees an
-  error once every key has been tried (`key 1 → key 2 → key 3 …`), and the
-  response reports which key served the batch (`usedKey`) and why each earlier
-  key failed (`keysTried`). Notes:
+  to a pool that generation walks **strictly in saved order**. Key 1 is always
+  tried first; generation moves on to key 2 only when key 1 fails (rate limit,
+  daily quota, network error, bad key …) and to key 3 only when key 2 fails too.
+  The client only sees an error once every key has been tried (`key 1 → key 2 →
+  key 3 …`), and the response reports which key served the batch (`usedKey`) and
+  why each earlier key failed (`keysTried`). Notes:
+  - The pool is **not** load-balanced: while key 1 is healthy it serves every
+    batch and the spare keys step in only when it can't. That keeps usage pinned
+    to the primary key and the backups idle until they are actually needed.
+  - `usedKey.position` is the key's **slot in the Settings list** (1-based, saved
+    order) — the same number its row shows — and `usedKey.attempt` says how many
+    tries it took to reach it.
   - Keys whose *daily* quota is spent are pushed to the back of the rotation, so
-    a spent key never costs a wasted request before the healthy ones.
-  - A daily-quota 429 rotates immediately; only per-minute rate limits are
-    retried (2s → 4s backoff) before moving on.
+    a spent key never costs a wasted request before the healthy ones — once key 1
+    is spent, key 2 becomes the primary for the rest of the day.
+  - A daily-quota 429 rotates immediately. The daily flag is also derived from
+    the **message text** of the OpenAI-compatible 429 (that shape carries no
+    `quotaId`), using Google's wording and the reported limit size — otherwise a
+    spent key was never flagged, so every batch paid the retry backoff on it and
+    the rotation never settled on a healthy key.
+  - A per-minute 429 only backs off (2s → 4s) when it is the **last** key left.
+    While another key is available the batch is handed straight over, so a pool
+    never queues behind one key's rate-limit window; a spent key is always tried
+    once, quickly, as a last resort.
   - Google applies Gemini's limits **per project, not per key** — keys must come
     from separate projects (separate AI Studio accounts) to actually multiply
     your daily quota. Keys from one project share one quota.
@@ -156,17 +174,20 @@ npm run client   # just Vite, on :5173
   limit from the provider's 429 quota payload; until then it uses an estimate
   (`RPD_*` env vars, or the table in `keyUsage.js`) marked with `~`. The client
   polls `GET /api/user/key-stats` every 2s while generating.
-- `npm test` runs the two plain-Node scripts in `server/tests` (no MongoDB, no
+- `npm test` runs the plain-Node scripts in `server/tests` (no MongoDB, no
   network — they stub the User model and stand up a throwaway local provider):
   - `rotation.test.mjs` drives the real `generate` handler: key rotation when a
-    daily quota is spent, spent keys being skipped, per-minute 429 retries,
-    usage recording and the response payload.
+    daily quota is spent (including message-only 429 bodies with no `quotaId`),
+    spent keys being skipped so the pool settles on key 3, per-minute 429 retries,
+    load sharing across three keys, 429 body classification, usage recording and
+    the response payload.
   - `userKeys.test.mjs` drives the `/user` handlers: per-key stats in `/user/me`
     and `/user/key-stats`, Pacific-day bucket rollover, model-specific limits,
     and add/remove/duplicate key handling.
+  - `googleAuth.test.mjs` covers Google sign-in token verification.
 - The server retries transient failures (HTTP 429 rate limit, 5xx) with
-  exponential backoff (2s → 4s) before rotating to the next key, so a momentary
-  limit bump does not fail the whole batch.
+  exponential backoff (2s → 4s) so a momentary limit bump does not fail the whole
+  batch — but only when there is no other key to try (see key rotation above).
 - Every route under `/api/user` and `/api/generate` requires a valid JWT
   (issued at signup/login) via `server/middleware/auth.js`.
 - This project ships with no admin panel or password-reset flow — add one if

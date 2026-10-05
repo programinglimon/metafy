@@ -14,10 +14,10 @@ import {
   todayKey,
 } from '../utils/keyUsage.js';
 
-// Max images per request. Billing/limits are per request, not per image, so
-// batching stretches every provider's daily quota. 6 is the quality sweet
-// spot; raise via GEMINI_BATCH_SIZE (1-10) if needed.
-const MAX_BATCH = Math.max(1, Math.min(10, Number(process.env.GEMINI_BATCH_SIZE) || 6));
+// Max images per request (1-10). Billing/limits are per request, not per image,
+// so batching stretches every provider's daily quota. Default 10; override with
+// GEMINI_BATCH_SIZE (keep client BATCH_SIZE in Dashboard.jsx in sync).
+const MAX_BATCH = Math.max(1, Math.min(10, Number(process.env.GEMINI_BATCH_SIZE) || 10));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -28,7 +28,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // so a momentary per-minute limit bump doesn't fail the whole batch. A *daily*
 // quota error is never retried — waiting doesn't refill it, so the caller
 // rotates to the next saved key right away.
-async function fetchWithRetry(url, init, attempts = 3) {
+//
+// `rotateOnThrottle` means "another key is idle, so hand this batch over instead
+// of burning 2s + 4s on this one" — a pool of keys should share a per-minute
+// window, not queue behind it. Server errors (5xx) keep their backoff.
+async function fetchWithRetry(url, init, { attempts = 3, rotateOnThrottle = false } = {}) {
   let last = null;
   for (let i = 0; i < attempts; i++) {
     const res = await fetch(url, init);
@@ -44,6 +48,7 @@ async function fetchWithRetry(url, init, attempts = 3) {
     if (res.ok) return last;
     if (!(res.status === 429 || res.status >= 500)) return last;
     if (quota.exhaustedDaily) return last; // spent for the day → let the caller rotate
+    if (rotateOnThrottle && res.status === 429) return last; // let the caller try the next key
     if (i === attempts - 1) break;
 
     const retryAfter = Number(res.headers.get('Retry-After'));
@@ -183,19 +188,26 @@ function buildChatBody(provider, { model, images, kwCount, titleMin, titleMax, a
       image_url: provider.imageUrlObject ? { url: dataUrl(img) } : dataUrl(img),
     })),
   ];
+  // Output budget scales with the batch: each image needs ~2048 tokens for its
+  // title + keywords + the model's reasoning (6 images ≈ 12k, 10 ≈ 20k). Capped
+  // at Gemini 2.5's 65,536-token output ceiling. A fixed budget would truncate
+  // the JSON array for larger batches.
+  const maxTokens = Math.min(65536, Math.max(6144, images.length * 2048));
   return {
     model,
     messages: [{ role: 'user', content }],
     temperature: 0.4,
-    max_tokens: 12288, // 6 images x (title + 45 keywords + category)
+    max_tokens: maxTokens,
   };
 }
 
-// Every saved key for this provider, ordered the way generation should try them:
-// keys with quota left first (in saved order), then keys that already ran out
-// today as a last resort. That way a spent key never costs a wasted request
-// before the healthy ones get a chance, but it is still used if it's all we have
-// (e.g. the learned limit was optimistic).
+// Every saved key for this provider, in the strict order generation tries them:
+// the saved order — key 1 first, then key 2, then key 3. Key 1 is always the
+// primary; generation only advances to key 2 when key 1 fails (rate limit, daily
+// quota, network error, bad key …), and to key 3 only when key 2 fails too. Keys
+// whose *daily* quota is already spent are pushed to the back of the list so a
+// spent key never costs a wasted request, but they are still tried as a last
+// resort (e.g. the learned limit was optimistic).
 function generationKeys(user, provider, model) {
   const today = todayKey();
   const pool = Array.isArray(user[provider.poolField]) ? user[provider.poolField] : [];
@@ -221,13 +233,28 @@ function generationKeys(user, provider, model) {
       const dup = list.some((k) => {
         try { return decrypt(k.enc) === legacyPlain; } catch { return false; }
       });
-      if (!dup) list.push({ id: 'legacy', enc: user[provider.keyField], index: null, exhausted: false });
+      if (!dup) {
+        list.push({ id: 'legacy', enc: user[provider.keyField], index: null, exhausted: false });
+      }
     } catch {
       // corrupt legacy key — skip it
     }
   }
 
-  return [...list.filter((k) => !k.exhausted), ...list.filter((k) => k.exhausted)];
+  // Saved order is the priority — key 1 serves every batch and the spare keys
+  // step in only when it can't. `list` is already in saved order (the legacy key,
+  // if any, is appended last), so a plain partition preserves it.
+  return [
+    ...list.filter((k) => !k.exhausted),
+    ...list.filter((k) => k.exhausted),
+  ];
+}
+
+// The key's slot in the Settings list (saved order). Generation may start on any
+// key now, so the client is told the slot — not the attempt number — to blink the
+// row that is really working.
+function slotOf(key, attempt) {
+  return key.index === null || key.index === undefined ? attempt : key.index + 1;
 }
 
 export async function generate(req, res) {
@@ -249,8 +276,9 @@ export async function generate(req, res) {
 
     const chosenModel = p.models.includes(model) ? model : p.defaultModel;
 
-    // All saved keys, healthy ones first — generation walks this list and moves
-    // to the next key automatically when one is rate limited or out of quota.
+    // All saved keys in saved order (key 1 → key 2 → key 3) with spent keys last;
+    // generation walks this list and moves to the next key automatically when one
+    // is rate limited or out of quota.
     const keys = generationKeys(user, p, chosenModel);
     if (!keys.length) {
       return res.status(400).json({ error: `Add your ${p.label} API key in settings first.` });
@@ -275,27 +303,34 @@ export async function generate(req, res) {
 
     const body = buildChatBody(p, { model: chosenModel, images: batch, kwCount, titleMin, titleMax, assetType });
 
-    // Try each saved key in order. A rate-limited or out-of-quota key rotates to
-    // the next one automatically; the client only sees an error once every key
-    // has been tried. Every attempt is recorded against that key so Settings can
-    // show live usage, and the key is flagged "in flight" while it's on the wire
+    // Try each saved key in order — key 1 first, then key 2, then key 3. A key
+    // that fails (rate limited, out of quota, network error, …) rotates to the
+    // next one automatically; the client only sees an error once every key has
+    // been tried. Every attempt is recorded against that key so Settings can show
+    // live usage, and the key is flagged "in flight" while it's on the wire
     // (that's what makes its status dot blink).
     let lastError = '';
     const keysTried = [];
 
     for (let ki = 0; ki < keys.length; ki++) {
       const key = keys[ki];
+      // Slot in the Settings list (key 1 → key 2 → …).
+      const slot = slotOf(key, ki + 1);
 
       let apiKey;
       try {
         apiKey = decrypt(key.enc);
       } catch {
-        lastError = `Key ${ki + 1}/${keys.length} could not be decrypted.`;
-        keysTried.push({ position: ki + 1, id: key.id, status: 0, error: lastError });
+        lastError = `Key ${slot}/${keys.length} could not be decrypted.`;
+        keysTried.push({ position: slot, attempt: ki + 1, id: key.id, status: 0, error: lastError });
         continue;
       }
 
       beginUse(key.id);
+      // Another key is idle (or this one is only kept as a last resort): a 429 on
+      // this key should hand the batch to the next key instead of stalling out a
+      // per-minute window that the spare key isn't even using.
+      const rotateOnThrottle = ki < keys.length - 1 || key.exhausted;
       let out;
       try {
         out = await fetchWithRetry(p.endpoint, {
@@ -305,16 +340,16 @@ export async function generate(req, res) {
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify(body),
-        });
+        }, { rotateOnThrottle });
       } catch (err) {
         endUse(key.id, 'network-error');
-        lastError = `Key ${ki + 1}/${keys.length}: ${err.message}`;
-        console.error(`[ai] ${p.label} key ${ki + 1}/${keys.length} network error:`, err.message);
+        lastError = `Key ${slot}/${keys.length}: ${err.message}`;
+        console.error(`[ai] ${p.label} key ${slot}/${keys.length} network error:`, err.message);
         await recordUse({
           userId: req.userId, poolField: p.poolField, index: key.index, ok: false,
           error: lastError, model: chosenModel,
         });
-        keysTried.push({ position: ki + 1, id: key.id, status: 0, error: lastError });
+        keysTried.push({ position: slot, attempt: ki + 1, id: key.id, status: 0, error: lastError });
         continue;
       }
       endUse(key.id, out.res.ok ? 'ok' : `http-${out.res.status}`);
@@ -324,14 +359,17 @@ export async function generate(req, res) {
         const spent = out.quota.exhaustedDaily;
         lastError = message;
         console.error(
-          `[ai] ${p.label} key ${ki + 1}/${keys.length} error ${out.res.status}:`,
+          `[ai] ${p.label} key ${slot}/${keys.length} error ${out.res.status}:`,
           out.bodyText.slice(0, 2000) || '(no body)'
         );
         await recordUse({
           userId: req.userId, poolField: p.poolField, index: key.index, ok: false,
           error: message, limit: out.quota.limit, exhausted: spent, model: chosenModel,
         });
-        keysTried.push({ position: ki + 1, id: key.id, status: out.res.status, error: message, exhausted: spent });
+        keysTried.push({
+          position: slot, attempt: ki + 1, id: key.id,
+          status: out.res.status, error: message, exhausted: spent,
+        });
         if (ki < keys.length - 1) {
           console.log(
             `[ai] ${p.label}: rotating to next key (${keys.length - ki - 1} left, ${spent ? 'daily quota spent' : `http-${out.res.status}`})`
@@ -359,7 +397,7 @@ export async function generate(req, res) {
 
       // Re-read the key pool so the client gets the just-updated counters.
       const fresh = await User.findById(req.userId).select(`email ${ALL_KEY_FIELDS.join(' ')}`);
-      const usedKey = { position: ki + 1, id: key.id, of: keys.length, model: chosenModel };
+      const usedKey = { position: slot, attempt: ki + 1, id: key.id, of: keys.length, model: chosenModel };
 
       const list = extractJsonArray(text);
       if (!list) {

@@ -11,8 +11,8 @@ let uidCounter = 0;
 
 // Images sent per /generate request. Gemini is billed/limited per request, not
 // per image, so batching multiplies the free-tier quota (~1000 req/day ≈
-// ~6000 images/day). Keep in sync with server GEMINI_BATCH_SIZE (default 6).
-const BATCH_SIZE = 6;
+// ~10000 images/day). Keep in sync with server GEMINI_BATCH_SIZE (default 10).
+const BATCH_SIZE = 10;
 
 // Classify which rasterization path a file takes.
 function classifyFile(file) {
@@ -91,7 +91,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [settings, setSettings] = useState({
-    provider: 'gemini', model: 'gemini-2.5-flash', assetType: 'photo', kwCount: 45, titleMin: 10, titleMax: 16, concurrency: 3,
+    provider: 'gemini', model: 'gemini-2.5-flash', assetType: 'photo', kwCount: 45, titleMin: 10, titleMax: 16,
   });
   const [generating, setGenerating] = useState(false);
   // Live per-key usage + which key is serving requests right now, refreshed from
@@ -209,15 +209,13 @@ export default function Dashboard() {
     // Group the queue into batches: each batch = ONE Gemini request.
     const batches = [];
     for (let i = 0; i < queue.length; i += BATCH_SIZE) batches.push(queue.slice(i, i + BATCH_SIZE));
-    const limit = Math.max(1, Math.min(4, settings.concurrency));
-    let cursor = 0;
-
-    async function worker() {
-      while (cursor < batches.length) {
-        await processBatch(batches[cursor++]);
-      }
+    // Send the batches strictly one at a time. Only one request is ever on the
+    // wire, so exactly one API key is used at a time — the pool is never spread
+    // across two keys at once, and rotation stays sequential (key 1 → key 2 →
+    // key 3, and only when a key fails).
+    for (const batch of batches) {
+      await processBatch(batch);
     }
-    await Promise.all(Array.from({ length: Math.min(limit, batches.length) }, worker));
     setGenerating(false);
     refreshKeyStats(); // final count once every batch has landed
   }

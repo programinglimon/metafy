@@ -355,13 +355,8 @@ export default function SettingsPanel({ settings, setSettings, keyStats, statsMe
       </div>
 
       <div className="row">
-        <label>CONCURRENT BATCHES</label>
-        <input
-          type="number" min={1} max={4}
-          value={settings.concurrency}
-          onChange={(e) => setSettings({ ...settings, concurrency: Number(e.target.value) })}
-        />
-        <span className="settings-hint">Each batch = 6 images in one request, so this many requests run in parallel.</span>
+        <label>BATCH SIZE</label>
+        <span className="settings-hint">10 images per request. Batches are sent one at a time, so only one API key is used at once (change it with the server <code>GEMINI_BATCH_SIZE</code> env var).</span>
       </div>
         </>
       )}

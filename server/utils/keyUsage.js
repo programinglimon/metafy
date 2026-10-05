@@ -85,8 +85,24 @@ export function estimatedDailyLimit(providerId, model) {
 // Gemini (native and OpenAI-compat) reports quota failures as
 //   error.details[].violations[] = { quotaId, quotaMetric, quotaValue }
 // where quotaId contains "PerDay"/"PerMinute" and quotaValue is the real limit.
+//
+// The OpenAI-compatible endpoint, however, usually sends NO details array at all
+// — just Google's quota wording with the metric and limit inside the message:
+//   "You exceeded your current quota, please check your plan and billing details.
+//    * Quota exceeded for metric:
+//      generativelanguage.googleapis.com/generate_content_free_tier_requests,
+//      limit: 250, model: gemini-2.5-flash. Please retry in 2.5s."
+// That message never says "per day", so the day/per-minute call is made from the
+// wording first and, failing that, from the size of the reported limit: for every
+// model this app ships the daily allowance is far bigger than the per-minute
+// window (gemini-2.5-flash: 250 RPD / 10 RPM, gemini-2.5-pro: 100 RPD / 5 RPM),
+// so DAILY_LIMIT_FLOOR separates them. A key flagged by mistake is still tried as
+// the last resort, and serving a request with it clears the flag again.
+//
 // Mistral/OpenRouter just say "rate limit exceeded" — a per-minute limit, so we
 // keep the key and retry instead of marking it spent for the day.
+const DAILY_LIMIT_FLOOR = 50;
+
 export function parseQuotaFailure(bodyText, status = 429) {
   const text = String(bodyText || '');
   let json = null;
@@ -115,12 +131,48 @@ export function parseQuotaFailure(bodyText, status = 429) {
   }
 
   const message = String(json?.error?.message || json?.message || text);
-  if (!out.limit) {
-    const m = message.match(/limit[:=\s"]+(\d{2,})/i);
-    if (m) out.limit = Number(m[1]);
+  // The metric is frequently only in the message, e.g.
+  // "Quota exceeded for metric: generativelanguage.googleapis.com/..._requests".
+  if (!out.metric) {
+    const m = message.match(/([a-z0-9_.-]*googleapis\.com\/[A-Za-z0-9_.-]+)/i);
+    if (m) out.metric = m[1];
   }
-  if (/per[_ ]?day|daily/i.test(`${out.quotaId} ${out.metric}`)) out.exhaustedDaily = true;
-  if (!out.exhaustedDaily && /(per day|daily limit|RPD)/i.test(message)) out.exhaustedDaily = true;
+  if (!out.limit) {
+    // A message-only body can list several violated metrics, e.g.
+    //   * Quota exceeded for metric: .../generate_content_free_tier_input_token_count, limit: 250000, ...
+    //   * Quota exceeded for metric: .../generate_content_free_tier_requests, limit: 250, ...
+    //   * Quota exceeded for metric: .../generate_content_free_tier_requests, limit: 10, ...
+    // Learn the limit from the *request* metric (the token count is a different
+    // unit and would be useless as "requests per day"), preferring the biggest
+    // one — that is the daily allowance; the small one is the per-minute window.
+    const re = /metric:\s*([A-Za-z0-9_./-]+),\s*limit:\s*(\d+)/gi;
+    let m;
+    let requests = 0;
+    let other = 0;
+    while ((m = re.exec(message))) {
+      const value = Number(m[2]);
+      if (!Number.isFinite(value)) continue;
+      if (/_requests?$/i.test(m[1])) requests = Math.max(requests, value);
+      else if (!/_tokens?$/i.test(m[1])) other = Math.max(other, value);
+    }
+    if (requests) out.limit = requests;
+    else if (other) out.limit = other;
+    if (!out.metric) {
+      const metricOnly = message.match(/metric:\s*([A-Za-z0-9_./-]+)/i);
+      if (metricOnly) out.metric = metricOnly[1];
+    }
+  }
+
+  // Which window did we blow? The details array says so via quotaId, but the
+  // OpenAI-compatible endpoint sends no details at all — then the only hints left
+  // are the wording and the size of the reported limit (see DAILY_LIMIT_FLOOR).
+  const said = `${out.quotaId} ${out.metric} ${message}`;
+  const perMinute = /per[_ ]?minute|per-minute|per minute|\bRPM\b|requests per min/i.test(said);
+  if (/per[_ ]?day|per-day|per day|daily|RPD/i.test(said)) {
+    out.exhaustedDaily = true;
+  } else if (out.limit >= DAILY_LIMIT_FLOOR && !perMinute) {
+    out.exhaustedDaily = true;
+  }
 
   return out;
 }
